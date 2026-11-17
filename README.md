@@ -27,7 +27,8 @@ The official `ghost:<version>-alpine` image is used unchanged underneath.
 | Logs to stdout only | the stock config also writes `content/logs`, which is replicated: three nodes appending to it is a sync conflict |
 | Mail defaults | Ghost's stock `Direct` transport mails from the node itself: rejected or spam. Without SMTP, `security__staffDeviceVerification` is off, or the owner could not sign in from a new device |
 | `flux-ghost` CLI | what the hub's panel runs through FluxOS `appexec`, like wp-cli for WordPress |
-| 503 "starting" page | instead of a bare 502 while Ghost boots |
+| Public port opens only when Ghost answers 200 | FDM checks a non-WordPress app with a bare TCP connect and sends a shared-db app's traffic to the master only. An nginx listening while Ghost boots reads as healthy and serves an error; a closed port fails the check and HAProxy uses a standby. Measured: refused until ready, then 200, never a 5xx |
+| Mail is encrypted or not sent | SMTP without `secure` gets `requireTLS`: nodemailer otherwise falls back to clear text, SMTP password included, when a server offers no STARTTLS. Measured against Mailpit: no STARTTLS -> refused, nothing sent; STARTTLS -> delivered. `mail__options__requireTLS=false` is the explicit way out. Port 25 is warned about in the log |
 
 **What it does not do: restart Ghost by itself.** The container's lifecycle is FluxOS's. When Ghost
 or nginx exits, the container exits and FluxOS restarts it. A version that restarted Ghost on
@@ -47,6 +48,7 @@ Ghost's own settings, with `__` for nesting (`database__connection__host`). Empt
 | `database__connection__password` | **required** (the operator's `DB_INIT_PASS`) |
 | `mail__transport`, `mail__from`, `mail__options__host`, `__port`, `__secure`, `__auth__user`, `__auth__pass` | none: mail off. Member sign-in (magic links), staff invites and password resets need it |
 | `security__staffDeviceVerification` | `true` with SMTP, `false` without |
+| `mail__options__requireTLS` | `true` for SMTP unless `mail__options__secure=true` (465) |
 | `FLUX_MIGRATION_LOCK_MAX_SECONDS` | 600 |
 
 Newsletters go through Mailgun, which the site owner sets in Ghost Admin; the image needs nothing.
@@ -87,7 +89,8 @@ onto a new `:latest`, keeping the volume; Ghost runs its migrations at the next 
 - first boot on an empty database ~50-70 s; restart with data ~15 s; ~150 MB RAM idle
 - https URL through nginx 200; Ghost directly without the header 301 to https
 - stop during the first migration, restart: lock released, initialisation finished, site 200
-- SMTP (Mailpit): setup and password-reset mails delivered
+- SMTP (Mailpit): setup and password-reset mails delivered over STARTTLS; a server without STARTTLS gets nothing
+- public port closed during boot, 200 from the first accepted connection
 - `users reset-password` then sign-in: 201; old password 422
 - `db export` -> change -> `db import` -> restart: the exported state is back
 
@@ -104,4 +107,4 @@ docker build --build-arg FLUX_IMAGE_VERSION=$(cat VERSION) -t ghost-flux:local .
 ## Versions
 
 - 1.0.0: Ghost 6.77.0; nginx, default URL, database wait, stale migration lock release, mail
-  defaults, `flux-ghost`.
+  defaults (encrypted or not sent), public port opens when Ghost answers, `flux-ghost`.

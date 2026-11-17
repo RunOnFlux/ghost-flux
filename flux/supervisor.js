@@ -143,6 +143,43 @@ async function clearStaleMigrationLock(env) {
   }
 }
 
+/**
+ * Resolves once Ghost itself answers 200 on loopback.
+ *
+ * nginx must not listen before this. Flux's domain manager checks a non-WordPress app with a bare
+ * TCP connect (no `healthcheck` in its custom.js), and for a shared-db app it sends traffic to the
+ * master's node only. An nginx that accepts while Ghost is still booting reads as healthy, so
+ * visitors get "starting" instead of being served by a standby. A closed port fails the check and
+ * HAProxy moves to the backup.
+ */
+function ghostAnswers(env) {
+  let host = 'localhost';
+  try { host = new URL(env.url).host; } catch { /* keep */ }
+  return new Promise((resolve) => {
+    const req = http.get({
+      host: '127.0.0.1',
+      port: Number(env.server__port),
+      path: '/ghost/api/admin/site/',
+      headers: { Host: host, 'X-Forwarded-Proto': lib.forwardedProto(env.url) },
+      timeout: 5000,
+    }, (res) => { res.resume(); resolve(res.statusCode === 200); });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(false));
+  });
+}
+
+async function startNginxWhenGhostAnswers(env) {
+  for (let i = 0; !stopping; i += 1) {
+    if (await ghostAnswers(env)) {
+      log('Ghost answers: opening the public port');
+      startNginx();
+      return;
+    }
+    if (i > 0 && i % 30 === 0) log(`Ghost is not answering yet (${i * 2}s); the public port stays closed`);
+    await sleep(2000);
+  }
+}
+
 async function main() {
   log(`ghost-flux ${process.env.FLUX_IMAGE_VERSION} (Ghost ${process.env.GHOST_VERSION})`);
   process.on('SIGTERM', () => shutdown(0, 'SIGTERM'));
@@ -151,17 +188,18 @@ async function main() {
   const host = await hostInfo();
   if (host.appName) log(`Flux app ${host.appName}, node ${host.ip || 'address unknown'}`);
   const env = lib.ghostEnv(process.env, { appName: host.appName });
-  log(`mail: ${env.mail__transport && env.mail__transport !== 'Direct' ? `${env.mail__transport} via ${env.mail__options__host || env.mail__options__service || '?'}` : 'not configured (member sign-in, invites and password resets cannot be emailed)'}`);
+  log(`mail: ${lib.mailSummary(env)}`);
   fs.mkdirSync(CONTENT, { recursive: true });
   // What `flux-ghost` (docker exec) reads, so it sees the configuration Ghost was started with.
   fs.mkdirSync('/run/flux', { recursive: true, mode: 0o700 });
   fs.writeFileSync('/run/flux/ghost-env.json', JSON.stringify(env), { mode: 0o600 });
 
   writeNginxConf(env);
-  startNginx();
   await waitForDatabase(env);
   await clearStaleMigrationLock(env);
-  if (!stopping) startGhost(env);
+  if (stopping) return;
+  startGhost(env);
+  await startNginxWhenGhostAnswers(env);
 }
 
 main().catch((e) => { log(`fatal: ${e.stack || e}`); process.exit(1); });

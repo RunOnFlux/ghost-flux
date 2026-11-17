@@ -51,3 +51,20 @@ test('forwardedProto', () => {
   assert.strictEqual(lib.forwardedProto('https://x'), 'https');
   assert.strictEqual(lib.forwardedProto('http://x'), 'http');
 });
+
+test('ghostEnv: SMTP must be encrypted', () => {
+  const plain = lib.ghostEnv({ mail__transport: 'SMTP', mail__options__port: '587' }, {});
+  assert.strictEqual(plain.mail__options__requireTLS, 'true');
+  const tls = lib.ghostEnv({ mail__transport: 'SMTP', mail__options__secure: 'true', mail__options__port: '465' }, {});
+  assert.strictEqual(tls.mail__options__requireTLS, undefined);
+  const optOut = lib.ghostEnv({ mail__transport: 'SMTP', mail__options__requireTLS: 'false' }, {});
+  assert.strictEqual(optOut.mail__options__requireTLS, 'false');
+  assert.strictEqual(lib.ghostEnv({}, {}).mail__options__requireTLS, undefined);
+});
+
+test('mailSummary', () => {
+  assert.match(lib.mailSummary({}), /not configured/);
+  assert.match(lib.mailSummary(lib.ghostEnv({ mail__transport: 'SMTP', mail__options__host: 'h', mail__options__port: '587' }, {})), /STARTTLS required/);
+  assert.match(lib.mailSummary({ mail__transport: 'SMTP', mail__options__host: 'h', mail__options__port: '465', mail__options__secure: 'true' }), /, TLS/);
+  assert.match(lib.mailSummary({ mail__transport: 'SMTP', mail__options__host: 'h', mail__options__port: '25', mail__options__requireTLS: 'false' }), /UNENCRYPTED.*port 25/);
+});

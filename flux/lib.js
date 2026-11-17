@@ -53,9 +53,38 @@ function ghostEnv(env, { appName } = {}) {
   } else {
     def('security__staffDeviceVerification', 'true');
   }
+
+  // ENCRYPTED OR NOT AT ALL. nodemailer upgrades a plain SMTP connection with STARTTLS only when
+  // the server offers it, and otherwise sends everything, the SMTP login included, in clear text.
+  // So unless the connection is TLS from the start (`secure`, port 465), STARTTLS is required:
+  // a server that cannot encrypt gets no mail rather than the password. Setting
+  // mail__options__requireTLS=false is the explicit, deliberate way out.
+  if (/^smtp$/i.test(String(out.mail__transport || ''))
+    && String(out.mail__options__secure).toLowerCase() !== 'true') {
+    def('mail__options__requireTLS', 'true');
+  }
   out.paths__contentPath = '/var/lib/ghost/content';
   out.NODE_ENV = 'production';
   return out;
+}
+
+/**
+ * One line for the log about how mail leaves this container. Port 25 gets a warning: many
+ * providers and node operators block outbound 25, and it is not meant for submission anyway.
+ */
+function mailSummary(env) {
+  const t = String(env.mail__transport || '');
+  if (!t || t === 'Direct') return 'not configured (member sign-in, invites and password resets cannot be emailed)';
+  const host = env.mail__options__host || env.mail__options__service || '?';
+  const port = String(env.mail__options__port || '');
+  let tls = 'its own transport';
+  if (/^smtp$/i.test(t)) {
+    if (String(env.mail__options__secure).toLowerCase() === 'true') tls = 'TLS';
+    else if (String(env.mail__options__requireTLS).toLowerCase() === 'true') tls = 'STARTTLS required';
+    else tls = 'UNENCRYPTED ALLOWED (mail__options__requireTLS=false)';
+  }
+  const warn = port === '25' ? '; WARNING: port 25 is often blocked outbound, use 465 or 587' : '';
+  return `${t} via ${host}${port ? `:${port}` : ''}, ${tls}${warn}`;
 }
 
 /** The protocol nginx forwards to Ghost: the one in Ghost's own URL, or Ghost loops redirecting. */
@@ -63,4 +92,4 @@ function forwardedProto(url) {
   return /^https:/i.test(String(url)) ? 'https' : 'http';
 }
 
-module.exports = { resolveUrl, ghostEnv, forwardedProto };
+module.exports = { resolveUrl, ghostEnv, mailSummary, forwardedProto };
