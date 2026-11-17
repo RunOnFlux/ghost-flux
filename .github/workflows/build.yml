@@ -70,7 +70,9 @@ jobs:
       - name: Push the tested image
         if: github.event_name != 'pull_request'
         run: |
-          for t in latest "${VERSION}"; do
+          # ghost-<version>: which Ghost an image carries, read by `flux-ghost update check`.
+          ghost="$(docker run --rm --entrypoint printenv ghost-flux:ci GHOST_VERSION)"
+          for t in latest "${VERSION}" "ghost-${ghost}"; do
             docker tag ghost-flux:ci "${IMAGE_NAME}:${t}"
             docker push "${IMAGE_NAME}:${t}"
           done

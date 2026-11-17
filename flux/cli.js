@@ -18,6 +18,7 @@
  *   users reset-password <email> [pw]    generated when omitted; also unlocks a locked user
  *   members signup <all|invite|paid|none>  who may sign up (restarts Ghost: settings are cached)
  *   themes list
+ *   update check                         running vs published image vs upstream Ghost
  *   db size
  *   db export                            SQL dump into the backups folder
  *   db import <file.sql>                 a dump uploaded to the content volume; Ghost is held
@@ -378,6 +379,38 @@ async function contentRestore(given) {
   out({ restored: name, restarted: true, note: 'Files added since the backup are kept; files in the backup are restored.' });
 }
 
+/** Docker Hub tags `{ name, digest }`, newest first, up to `pages` pages of 100. */
+async function hubTags(repo, { name = '', pages = 3 } = {}) {
+  const tags = [];
+  let url = `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100&ordering=last_updated${name ? `&name=${encodeURIComponent(name)}` : ''}`;
+  for (let i = 0; url && i < pages; i += 1) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'ghost-flux-update-check' } });
+    if (res.status === 404) return [];
+    if (!res.ok) throw new Error(`Docker Hub answered ${res.status} for ${repo}`);
+    const body = await res.json();
+    for (const t of body.results || []) tags.push({ name: t.name, digest: t.digest || null });
+    url = body.next;
+  }
+  return tags;
+}
+
+async function updateCheck() {
+  const repo = process.env.FLUX_IMAGE_REPO || 'runonflux/ghost-flux';
+  const errors = [];
+  const imageTags = await hubTags(repo).catch((e) => { errors.push(e.message); return null; });
+  const ghostTags = await hubTags('library/ghost', { name: '-alpine' }).catch((e) => { errors.push(e.message); return null; });
+  const report = lib.updateReport({
+    runningImage: process.env.FLUX_IMAGE_VERSION,
+    runningGhost: process.env.GHOST_VERSION,
+    imageTags,
+    ghostTags,
+  });
+  if (imageTags && !imageTags.length) report.note = `${repo} has no published tags yet`;
+  report.how = 'An update is a redeploy onto the published image: FluxOS does it by itself within six hours, or at once from the panel. The data is kept; Ghost migrates its database at that start.';
+  if (errors.length) report.errors = errors;
+  out(report);
+}
+
 function backupsList() { out(listBackups()); }
 
 function backupsDelete(f) {
@@ -398,6 +431,7 @@ const COMMANDS = {
   'users reset-password': (a) => usersResetPassword(a[0], a[1]),
   'members signup': (a) => membersSignup(a[0]),
   'themes list': () => themesList(),
+  'update check': () => updateCheck(),
   'db size': () => dbSize(),
   'db export': () => dbExport(),
   'db import': (a) => dbImport(a[0]),

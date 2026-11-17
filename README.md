@@ -87,6 +87,7 @@ flux-ghost users list
 flux-ghost users reset-password <email> [pw]  generated when omitted; also unlocks a locked user
 flux-ghost members signup <all|invite|paid|none>   restarts Ghost (settings are cached)
 flux-ghost themes list
+flux-ghost update check                       running image/Ghost vs the published :latest vs upstream Ghost
 flux-ghost db size
 flux-ghost db export                          -> content/.flux-backups/ghost-db-<time>.sql
 flux-ghost db import <path in content>        moved out of where it landed, Ghost held while importing
@@ -115,6 +116,15 @@ onto a new `:latest`, keeping the volume; Ghost runs its migrations at the next 
 `.github/workflows/ghost-update.yml` checks the official image every Tuesday and opens a pull
 request moving `BASE_IMAGE` to the newest Ghost of the same major version. It never publishes:
 merging is the decision, because a new `:latest` restarts every site.
+
+`flux-ghost update check` is what the panel shows: `updateAvailable` when the published `:latest`
+is a newer image than the one running (what a redeploy would install), `upstreamAhead` when Ghost
+has released something no published image carries yet, with release-note links. It reads Docker
+Hub's tag lists: every published image is also tagged `ghost-<version>` (build.yml), which is how
+the Ghost inside `:latest` is known. Why no self-update inside the container: FluxOS starts the
+image's Ghost at every redeploy, so a container that had upgraded itself would be taken back to an
+older Ghost over a database the newer one had migrated, and Ghost refuses that; and three nodes on
+one database must change version together.
 
 ## Not included
 

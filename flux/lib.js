@@ -201,7 +201,74 @@ function backupsToPrune(files, keep) {
   return out;
 }
 
+// --- updates ----------------------------------------------------------------------------------------
+
+/** `1.2.3` -> [1,2,3]; anything else -> null. */
+function parseVersion(v) {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(v || '').trim());
+  return m ? m.slice(1).map(Number) : null;
+}
+
+/** <0, 0, >0 like a sort comparator; unparseable versions sort first. */
+function compareVersions(a, b) {
+  const x = parseVersion(a);
+  const y = parseVersion(b);
+  if (!x || !y) return (x ? 1 : 0) - (y ? 1 : 0);
+  for (let i = 0; i < 3; i += 1) if (x[i] !== y[i]) return x[i] - y[i];
+  return 0;
+}
+
+/**
+ * What the update check reports, from Docker Hub tag listings (each `{ name, digest }`).
+ *
+ *   imageTags   runonflux/ghost-flux: `1.0.3` (the image VERSION), `ghost-6.77.0` (the Ghost in
+ *               it, pushed by build.yml), `latest`
+ *   ghostTags   library/ghost: `6.78.0-alpine` ...
+ *
+ * `updateAvailable` is about what FluxOS would actually deploy: the published `:latest` is a newer
+ * image than the one running. A newer Ghost upstream that is not yet in a published image is
+ * reported separately (`upstreamAhead`), because the panel cannot deploy it.
+ */
+function updateReport({ runningImage, runningGhost, imageTags, ghostTags }) {
+  const report = {
+    running: { image: runningImage || null, ghost: runningGhost || null },
+    published: null,
+    upstream: null,
+    updateAvailable: false,
+    upstreamAhead: false,
+  };
+  if (Array.isArray(imageTags) && imageTags.length) {
+    const latest = imageTags.find((t) => t.name === 'latest');
+    const versions = imageTags.filter((t) => parseVersion(t.name)).sort((a, b) => compareVersions(b.name, a.name));
+    const sameAs = (tag, re) => imageTags.find((t) => re.test(t.name) && tag && t.digest && t.digest === tag.digest);
+    const image = (latest && sameAs(latest, /^\d+\.\d+\.\d+$/)) || versions[0] || null;
+    const ghostTag = image && sameAs(image, /^ghost-\d+\.\d+\.\d+$/);
+    if (image) {
+      report.published = { image: image.name, ghost: ghostTag ? ghostTag.name.slice(6) : null };
+      report.updateAvailable = compareVersions(image.name, runningImage) > 0;
+    }
+  }
+  const major = parseVersion(runningGhost) ? parseVersion(runningGhost)[0] : null;
+  if (Array.isArray(ghostTags) && major !== null) {
+    const same = ghostTags.map((t) => /^(\d+\.\d+\.\d+)-alpine$/.exec(t.name)).filter(Boolean).map((m) => m[1])
+      .filter((v) => parseVersion(v)[0] === major).sort(compareVersions);
+    const top = same[same.length - 1];
+    if (top) {
+      report.upstream = { ghost: top, releaseNotes: `https://github.com/TryGhost/Ghost/releases/tag/v${top}` };
+      const inImage = (report.published && report.published.ghost) || runningGhost;
+      report.upstreamAhead = compareVersions(top, inImage) > 0;
+    }
+  }
+  if (report.published && report.published.ghost) {
+    report.published.releaseNotes = `https://github.com/TryGhost/Ghost/releases/tag/v${report.published.ghost}`;
+  }
+  return report;
+}
+
 module.exports = {
+  parseVersion,
+  compareVersions,
+  updateReport,
   resolveUrl,
   ghostEnv,
   mailSummary,

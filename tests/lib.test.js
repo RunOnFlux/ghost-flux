@@ -130,3 +130,33 @@ test('backupsToPrune keeps the newest of each kind', () => {
   assert.deepStrictEqual(lib.backupsToPrune(files, 2).map((x) => x.file), ['d1']);
   assert.deepStrictEqual(lib.backupsToPrune(files, 1).map((x) => x.file).sort(), ['d1', 'd3']);
 });
+
+test('compareVersions', () => {
+  assert.ok(lib.compareVersions('1.0.10', '1.0.9') > 0);
+  assert.strictEqual(lib.compareVersions('6.77.0', 'v6.77.0'), 0);
+  assert.ok(lib.compareVersions('1.0.0', 'dev') > 0);
+});
+
+test('updateReport: a newer published image', () => {
+  const imageTags = [
+    { name: 'latest', digest: 'b' }, { name: '1.0.1', digest: 'b' }, { name: 'ghost-6.78.0', digest: 'b' },
+    { name: '1.0.0', digest: 'a' }, { name: 'ghost-6.77.0', digest: 'a' },
+  ];
+  const ghostTags = [{ name: '6.79.0-alpine' }, { name: '6.78.0-alpine' }, { name: '7.0.0-alpine' }, { name: 'alpine' }];
+  const r = lib.updateReport({ runningImage: '1.0.0', runningGhost: '6.77.0', imageTags, ghostTags });
+  assert.strictEqual(r.published.image, '1.0.1');
+  assert.strictEqual(r.published.ghost, '6.78.0');
+  assert.strictEqual(r.updateAvailable, true);
+  assert.strictEqual(r.upstream.ghost, '6.79.0'); // the same major only
+  assert.strictEqual(r.upstreamAhead, true);
+});
+
+test('updateReport: up to date, nothing published, Hub unreachable', () => {
+  const tags = [{ name: 'latest', digest: 'a' }, { name: '1.0.0', digest: 'a' }, { name: 'ghost-6.77.0', digest: 'a' }];
+  const up = lib.updateReport({ runningImage: '1.0.0', runningGhost: '6.77.0', imageTags: tags, ghostTags: [{ name: '6.77.0-alpine' }] });
+  assert.strictEqual(up.updateAvailable, false);
+  assert.strictEqual(up.upstreamAhead, false);
+  const none = lib.updateReport({ runningImage: '1.0.0', runningGhost: '6.77.0', imageTags: [], ghostTags: null });
+  assert.strictEqual(none.published, null);
+  assert.strictEqual(none.updateAvailable, false);
+});
