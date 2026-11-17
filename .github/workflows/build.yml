@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - name: Unit tests
@@ -50,18 +50,18 @@ jobs:
       - name: Image test (MySQL 8.3.0, first boot, CLI)
         run: |
           docker network create t
-          docker run -d --name db --network t -e MYSQL_ROOT_PASSWORD=Ci_pw_123456 mysql:8.3.0 --disable-log-bin
-          docker run -d --name g --network t -p 8080:2368 -e url=https://ci.example.test \
-            -e database__connection__host=db -e database__connection__port=3306 \
+          docker run -d --name ci-mysql --network t -e MYSQL_ROOT_PASSWORD=Ci_pw_123456 mysql:8.3.0 --disable-log-bin
+          docker run -d --name ci-ghost --network t -p 8080:2368 -e url=https://ci.example.test \
+            -e database__connection__host=ci-mysql -e database__connection__port=3306 \
             -e database__connection__password=Ci_pw_123456 ghost-flux:ci
           for i in $(seq 1 100); do
             c=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: ci.example.test' http://localhost:8080/) || true
             [ "$c" = 200 ] && break; sleep 3
           done
-          docker logs g | tail -30
+          docker logs ci-ghost | tail -30
           [ "$c" = 200 ]
-          docker exec g flux-ghost info | jq -e '.ok and .data.database.reachable'
-          docker exec g flux-ghost db export | jq -e '.ok'
+          docker exec ci-ghost flux-ghost info | jq -e '.ok and .data.database.reachable'
+          docker exec ci-ghost flux-ghost db export | jq -e '.ok'
       - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
         with:
