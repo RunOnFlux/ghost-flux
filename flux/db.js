@@ -69,4 +69,31 @@ async function releaseMigrationLock(env) {
   }
 }
 
-module.exports = { ping, migrationLock, releaseMigrationLock };
+/**
+ * A fingerprint of what Ghost reads once at boot and keeps in memory: its settings and the active
+ * theme's custom settings. Null before Ghost has created its tables. Reads only.
+ */
+async function fingerprint(env) {
+  const conn = await connect(env);
+  try {
+    const hash = require('crypto').createHash('sha256');
+    try {
+      const [s] = await conn.query('SELECT MAX(updated_at) AS m, COUNT(*) AS n FROM settings');
+      hash.update(JSON.stringify(s[0] || {}));
+    } catch (e) {
+      if (e && (e.code === 'ER_NO_SUCH_TABLE' || e.code === 'ER_BAD_DB_ERROR')) return null;
+      throw e;
+    }
+    try {
+      const [t] = await conn.query('SELECT theme, `key`, value FROM custom_theme_settings ORDER BY id');
+      hash.update(JSON.stringify(t));
+    } catch (e) {
+      if (!(e && e.code === 'ER_NO_SUCH_TABLE')) throw e;
+    }
+    return hash.digest('hex');
+  } finally {
+    await conn.end().catch(() => {});
+  }
+}
+
+module.exports = { ping, migrationLock, releaseMigrationLock, fingerprint };

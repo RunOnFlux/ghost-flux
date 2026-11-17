@@ -1,0 +1,61 @@
+name: Follow Ghost releases
+
+# Ghost releases about every week, security fixes included. This checks the official image for a
+# newer 6.x and OPENS A PULL REQUEST that moves BASE_IMAGE and bumps VERSION; it never publishes.
+# Merging is the decision, because publishing :latest restarts every site on it (FluxOS soft-
+# redeploys onto a new digest within six hours, and Ghost runs its migrations at that start).
+# The pull request runs build.yml's tests, the image test included.
+
+on:
+  schedule:
+    - cron: '0 7 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: versions
+        run: |
+          current="$(sed -n 's/^ARG BASE_IMAGE=ghost:\([0-9.]*\)-alpine$/\1/p' Dockerfile)"
+          [ -n "$current" ] || { echo "::error::BASE_IMAGE is not ghost:<x.y.z>-alpine"; exit 1; }
+          major="${current%%.*}"
+          # The newest x.y.z-alpine tag of the same major version (a new major is a manual move).
+          latest="$(curl -fsS "https://hub.docker.com/v2/repositories/library/ghost/tags?page_size=100&name=-alpine" \
+            | jq -r '.results[].name' | grep -E "^${major}\.[0-9]+\.[0-9]+-alpine$" | sed 's/-alpine$//' | sort -V | tail -1)"
+          echo "current=${current}" >>"$GITHUB_OUTPUT"
+          echo "latest=${latest}" >>"$GITHUB_OUTPUT"
+          echo "current ${current}, latest ${latest}"
+
+      - name: Move to the new Ghost
+        if: steps.versions.outputs.latest != '' && steps.versions.outputs.latest != steps.versions.outputs.current
+        env:
+          CUR: ${{ steps.versions.outputs.current }}
+          NEW: ${{ steps.versions.outputs.latest }}
+        run: |
+          sed -i "s/^ARG BASE_IMAGE=ghost:${CUR}-alpine$/ARG BASE_IMAGE=ghost:${NEW}-alpine/" Dockerfile
+          v="$(tr -d '[:space:]' <VERSION)"; IFS=. read -r a b c <<<"$v"; next="${a}.${b}.$((c + 1))"
+          echo "$next" >VERSION
+          sed -i "/^## Versions$/a\\
+          \\
+          - ${next}: Ghost ${NEW} (from ${CUR}). Release notes: https://github.com/TryGhost/Ghost/releases/tag/v${NEW}" README.md
+
+      - uses: peter-evans/create-pull-request@v7
+        if: steps.versions.outputs.latest != '' && steps.versions.outputs.latest != steps.versions.outputs.current
+        with:
+          branch: ghost-${{ steps.versions.outputs.latest }}
+          title: Ghost ${{ steps.versions.outputs.latest }}
+          commit-message: Ghost ${{ steps.versions.outputs.latest }}
+          body: |
+            Moves the base image from Ghost ${{ steps.versions.outputs.current }} to ${{ steps.versions.outputs.latest }}.
+
+            Release notes: https://github.com/TryGhost/Ghost/releases/tag/v${{ steps.versions.outputs.latest }}
+
+            Merging publishes `:latest`, and every Ghost site on Flux moves to it within six hours
+            (FluxOS soft redeploy, data kept; Ghost runs its migrations at that start).
