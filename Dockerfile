@@ -3,7 +3,7 @@
 #
 # The official image is used as it is; this adds a supervisor (PID 1 under tini) and nginx in front
 # of Ghost. See README.md for why each piece exists.
-ARG BASE_IMAGE=ghost:6.77.0-alpine
+ARG BASE_IMAGE=ghost:6.78.0-alpine
 FROM ${BASE_IMAGE}
 
 ARG FLUX_IMAGE_VERSION=dev

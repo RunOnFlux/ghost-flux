@@ -157,6 +157,8 @@ docker build --build-arg FLUX_IMAGE_VERSION=$(cat VERSION) -t ghost-flux:local .
 
 ## Versions
 
+- 1.0.1: Ghost 6.78.0 (from 6.77.0). Release notes: https://github.com/TryGhost/Ghost/releases/tag/v6.78.0
+
 - 1.0.0: Ghost 6.77.0; nginx, default URL, database wait, stale migration lock release, mail
   defaults (encrypted or not sent), public port opens when Ghost answers, role-aware background
   jobs and standby refresh, `flux-ghost` with held imports and restores, backup retention.
