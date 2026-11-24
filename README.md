@@ -35,7 +35,7 @@ The official `ghost:<version>-alpine` image is used unchanged underneath.
 Ghost was not written for several processes on one database: each one caches its settings and
 active theme at boot, and runs its own background jobs. On Flux there are three, and only the
 shared-db master's node serves (FDM marks the others `backup`). So the supervisor reads this node's
-role (FluxOS `hostinfo` address against the local operator's `/status` `masterIP`) and:
+role (FluxOS `hostinfo` address against the `masterIP` of the local operator's `/status`, on its HTTP port 8008) and:
 
 | role | background jobs | restarts Ghost when |
 |---|---|---|
