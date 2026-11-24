@@ -79,6 +79,7 @@ const S = {
   startedAs: 'unknown',
   role: 'unknown',
   roleStable: false,
+  operatorAnswers: null, // whether /status answered at the last check (null: never asked)
   lastRestartAt: 0,
   holdUntil: 0,
   baseline: null, // fingerprint taken when Ghost first answered after its start
@@ -266,8 +267,16 @@ async function fingerprint() {
 
 async function currentRole() {
   if (!hasDb() || !S.host.appName) return 'unknown';
-  const port = process.env.FLUX_OPERATOR_API_PORT || 7071;
-  return lib.roleOf(await getJson(`http://fluxoperator_${S.host.appName}:${port}/status`), S.host.ip);
+  // The operator's HTTP interface. 7071 is its socket.io listener and answers no /status.
+  const port = process.env.FLUX_OPERATOR_API_PORT || 8008;
+  const status = await getJson(`http://fluxoperator_${S.host.appName}:${port}/status`);
+  // Said once each way: without an answer the role stays 'unknown', which restarts nothing and is
+  // otherwise silent.
+  if (S.operatorAnswers !== Boolean(status)) {
+    S.operatorAnswers = Boolean(status);
+    log(status ? 'the operator answers /status' : `the operator does not answer /status on port ${port}: the role is unknown`);
+  }
+  return lib.roleOf(status, S.host.ip);
 }
 
 // --- actions ---------------------------------------------------------------------------------------
