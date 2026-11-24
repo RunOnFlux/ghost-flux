@@ -4,14 +4,21 @@ name: Follow Ghost releases
 # newer 6.x and OPENS A PULL REQUEST that moves BASE_IMAGE and bumps VERSION; it never publishes.
 # Merging is the decision, because publishing :latest restarts every site on it (FluxOS soft-
 # redeploys onto a new digest within six hours, and Ghost runs its migrations at that start).
-# The pull request runs build.yml's tests, the image test included.
+# A pull request opened with GITHUB_TOKEN starts no workflow, so this starts build.yml on its branch
+# (tests and the image test; only main publishes).
+#
+# Two slots on the same day, off the full hour: GitHub delays or drops scheduled runs under load, and
+# a dropped single slot would mean a week without a check. The second finds nothing to do, or only
+# refreshes the open pull request.
 
 on:
   schedule:
-    - cron: '0 7 * * 2'
+    - cron: '17 6 * * 2'
+    - cron: '43 13 * * 2'
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -46,7 +53,8 @@ jobs:
           \\
           - ${next}: Ghost ${NEW} (from ${CUR}). Release notes: https://github.com/TryGhost/Ghost/releases/tag/v${NEW}" README.md
 
-      - uses: peter-evans/create-pull-request@v7
+      - id: pr
+        uses: peter-evans/create-pull-request@v7
         if: steps.versions.outputs.latest != '' && steps.versions.outputs.latest != steps.versions.outputs.current
         with:
           branch: ghost-${{ steps.versions.outputs.latest }}
@@ -59,3 +67,10 @@ jobs:
 
             Merging publishes `:latest`, and every Ghost site on Flux moves to it within six hours
             (FluxOS soft redeploy, data kept; Ghost runs its migrations at that start).
+
+      - name: Test the pull request's branch
+        if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.pr.outputs.pull-request-branch }}
+        run: gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"

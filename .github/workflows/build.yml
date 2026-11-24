@@ -2,7 +2,8 @@ name: Test, build and publish
 
 # Publishing :latest reaches running sites: FluxOS checks every app's tag every six hours and
 # soft-redeploys onto a new image (Ghost then runs its migrations at start). So the image is tested
-# before it is pushed, and a pull request only tests.
+# before it is pushed, and only main publishes: a pull request, or a manual run on another branch,
+# only tests.
 
 on:
   push:
@@ -63,12 +64,12 @@ jobs:
           docker exec ci-ghost flux-ghost info | jq -e '.ok and .data.database.reachable'
           docker exec ci-ghost flux-ghost db export | jq -e '.ok'
       - uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Push the tested image
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           # ghost-<version>: which Ghost an image carries, read by `flux-ghost update check`.
           ghost="$(docker run --rm --entrypoint printenv ghost-flux:ci GHOST_VERSION)"
